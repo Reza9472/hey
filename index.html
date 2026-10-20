@@ -84,7 +84,7 @@
     background: var(--no); color: var(--no-ink);
   }
   #no.loose {
-    position: fixed; z-index: 4; margin: 0;
+    position: fixed; z-index: 4; margin: 0; transition: font-size .2s ease, padding .2s ease; will-change: transform;
   }
   .hint { font-size: .85rem; color: var(--muted); min-height: 1.4em; margin: 0; }
 
@@ -154,69 +154,151 @@
 
     // ---- The No button that won't be caught ----
     var labels = ['No', 'Are you sure?', 'Really?', 'Think about it…', 'Nope, try again', 'Not an option', 'Yes is right there', 'Come on 😅', 'You can\'t catch me', 'Just say yes'];
-    var tries = 0;
-    var yesScale = 1;
+    var hints = ['', 'Hm, it moved.', 'Slippery little button.', 'It really doesn\'t want to be pressed.', 'The other button is much easier to hit.', 'Okay, you\'ve made your point. Yes?'];
+    var tries = 0, lastTry = 0;
+    var PAD = 12;
+    var fly = { on: false, x: 0, y: 0, vx: 0, vy: 0, t: 0, last: 0 };
+    var pointer = { x: -9999, y: -9999, t: 0 };
 
     function rand(min, max) { return Math.random() * (max - min) + min; }
 
-    function dodge(e) {
-      if (e) { e.preventDefault(); }
+    function registerTry() {
+      var now = performance.now();
+      if (now - lastTry < 500) return;
+      lastTry = now;
       tries++;
-      var pad = 12;
-      var w = no.offsetWidth, hgt = no.offsetHeight;
-      var vw = window.innerWidth, vh = window.innerHeight;
-      if (!no.classList.contains('loose')) no.classList.add('loose');
-
-      // Pick a spot far from the pointer and away from the current position.
-      var cur = no.getBoundingClientRect();
-      var px = e && e.clientX != null ? e.clientX : cur.left + w / 2;
-      var py = e && e.clientY != null ? e.clientY : cur.top + hgt / 2;
-      var x, y, attempts = 0;
-      do {
-        x = rand(pad, Math.max(pad, vw - w - pad));
-        y = rand(pad, Math.max(pad, vh - hgt - pad));
-        attempts++;
-      } while (attempts < 20 && Math.hypot(x + w / 2 - px, y + hgt / 2 - py) < Math.min(vw, vh) * 0.35);
-      no.style.left = x + 'px';
-      no.style.top = y + 'px';
-
       no.textContent = labels[Math.min(tries, labels.length - 1)];
       if (tries > 3) {
-        var s = Math.max(0.55, 1 - (tries - 3) * 0.06);
-        no.style.fontSize = (1.15 * s) + 'rem';
-        no.style.padding = (0.9 * s) + 'rem ' + (2 * s) + 'rem';
+        var sc = Math.max(0.55, 1 - (tries - 3) * 0.06);
+        no.style.fontSize = (1.15 * sc) + 'rem';
+        no.style.padding = (0.9 * sc) + 'rem ' + (2 * sc) + 'rem';
       }
-      yesScale = Math.min(1.6, 1 + tries * 0.05);
-      yes.style.transform = 'scale(' + yesScale + ')';
-
-      var hints = ['', 'Hm, it moved.', 'Slippery little button.', 'It really doesn\'t want to be pressed.', 'The other button is much easier to hit.', 'Okay, you\'ve made your point. Yes?'];
+      yes.style.transform = 'scale(' + Math.min(1.6, 1 + tries * 0.05) + ')';
       hint.textContent = tries < hints.length ? hints[tries] : hints[hints.length - 1];
     }
 
-    no.addEventListener('pointerover', dodge);
-    no.addEventListener('pointerdown', dodge);
-    no.addEventListener('touchstart', dodge, { passive: false });
-    no.addEventListener('mousedown', dodge);
-    no.addEventListener('click', dodge);
-    no.addEventListener('focus', function () { dodge(); yes.focus(); });
-    no.addEventListener('keydown', function (e) { e.preventDefault(); dodge(); yes.focus(); });
-
-    // If she drags a finger onto it, hop away too.
-    document.addEventListener('pointermove', function (e) {
-      if (e.pointerType === 'mouse') return;
+    // Release the button from the row so it can move freely, keeping its current spot.
+    function release() {
+      if (no.classList.contains('loose')) return;
       var r = no.getBoundingClientRect();
-      if (e.clientX > r.left - 24 && e.clientX < r.right + 24 && e.clientY > r.top - 24 && e.clientY < r.bottom + 24) dodge(e);
+      no.classList.add('loose');
+      fly.x = r.left; fly.y = r.top;
+      no.style.left = fly.x + 'px';
+      no.style.top = fly.y + 'px';
+    }
+
+    // Instant hop to a spot far from the pointer (used on a direct press, and as the whole behaviour when motion is reduced).
+    function teleport(px, py) {
+      release();
+      var w = no.offsetWidth, h = no.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+      var x, y, n = 0;
+      do {
+        x = rand(PAD, Math.max(PAD, vw - w - PAD));
+        y = rand(PAD, Math.max(PAD, vh - h - PAD));
+        n++;
+      } while (n < 20 && Math.hypot(x + w / 2 - px, y + h / 2 - py) < Math.min(vw, vh) * 0.35);
+      fly.x = x; fly.y = y;
+      no.style.left = x + 'px';
+      no.style.top = y + 'px';
+      // Fling away from the pointer so the flight continues in a sensible direction.
+      var ang = Math.atan2(y + h / 2 - py, x + w / 2 - px);
+      var sp = speed();
+      fly.vx = Math.cos(ang) * sp; fly.vy = Math.sin(ang) * sp;
+    }
+
+    function speed() { return Math.min(460, 150 + tries * 35); }
+
+    function takeOff() {
+      if (fly.on || reduce) return;
+      release();
+      fly.on = true;
+      var ang = rand(-2.6, -0.5); // mostly upward, so it visibly leaves the row
+      fly.vx = Math.cos(ang) * speed(); fly.vy = Math.sin(ang) * speed();
+      fly.last = performance.now();
+      requestAnimationFrame(step);
+    }
+
+    function step(now) {
+      if (!fly.on) return;
+      var dt = Math.min(0.05, (now - fly.last) / 1000);
+      fly.last = now; fly.t += dt;
+      var w = no.offsetWidth, h = no.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+      var cx = fly.x + w / 2, cy = fly.y + h / 2;
+
+      // Steer away from a nearby pointer or finger.
+      var dx = cx - pointer.x, dy = cy - pointer.y, d = Math.hypot(dx, dy);
+      if (d < 150 && now - pointer.t < 1500) {
+        var push = (150 - d) / 150;
+        fly.vx += (dx / (d || 1)) * push * 2600 * dt;
+        fly.vy += (dy / (d || 1)) * push * 2600 * dt;
+        if (d < 90) registerTry();
+      }
+
+      // Gentle wobble, then keep the speed within bounds.
+      fly.vy += Math.sin(fly.t * 3.1) * 180 * dt;
+      fly.vx += Math.cos(fly.t * 2.3) * 120 * dt;
+      var sp = Math.hypot(fly.vx, fly.vy), target = speed();
+      if (sp > target * 1.9) { fly.vx *= 0.96; fly.vy *= 0.96; }
+      if (sp < target * 0.7) { fly.vx *= 1.04; fly.vy *= 1.04; }
+
+      fly.x += fly.vx * dt; fly.y += fly.vy * dt;
+
+      // Bounce off the edges.
+      if (fly.x < PAD) { fly.x = PAD; fly.vx = Math.abs(fly.vx); }
+      if (fly.x > vw - w - PAD) { fly.x = vw - w - PAD; fly.vx = -Math.abs(fly.vx); }
+      if (fly.y < PAD) { fly.y = PAD; fly.vy = Math.abs(fly.vy); }
+      if (fly.y > vh - h - PAD) { fly.y = vh - h - PAD; fly.vy = -Math.abs(fly.vy); }
+
+      var bank = Math.max(-14, Math.min(14, fly.vx / 30));
+      no.style.transform = 'translate(' + (fly.x - parseFloat(no.style.left || 0)) + 'px,' + (fly.y - parseFloat(no.style.top || 0)) + 'px) rotate(' + bank + 'deg)';
+      requestAnimationFrame(step);
+    }
+
+    function onPress(e) {
+      e.preventDefault();
+      var px = e.clientX != null ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : fly.x);
+      var py = e.clientY != null ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : fly.y);
+      registerTry();
+      no.style.transform = '';
+      teleport(px, py);
+      takeOff();
+    }
+
+    no.addEventListener('pointerdown', onPress);
+    no.addEventListener('touchstart', onPress, { passive: false });
+    no.addEventListener('mousedown', onPress);
+    no.addEventListener('click', onPress);
+    no.addEventListener('pointerover', function (e) { if (reduce) onPress(e); else { registerTry(); takeOff(); } });
+    no.addEventListener('focus', function () { registerTry(); if (reduce) teleport(-9999, -9999); takeOff(); yes.focus(); });
+    no.addEventListener('keydown', function (e) { e.preventDefault(); yes.focus(); });
+
+    document.addEventListener('pointermove', function (e) {
+      pointer.x = e.clientX; pointer.y = e.clientY; pointer.t = performance.now();
+      if (reduce) {
+        var r = no.getBoundingClientRect();
+        if (e.clientX > r.left - 24 && e.clientX < r.right + 24 && e.clientY > r.top - 24 && e.clientY < r.bottom + 24) { registerTry(); teleport(e.clientX, e.clientY); }
+      }
+    }, { passive: true });
+    document.addEventListener('touchmove', function (e) {
+      var t = e.touches[0]; if (!t) return;
+      pointer.x = t.clientX; pointer.y = t.clientY; pointer.t = performance.now();
     }, { passive: true });
 
     window.addEventListener('resize', function () {
       if (!no.classList.contains('loose')) return;
-      var r = no.getBoundingClientRect();
-      if (r.right > window.innerWidth || r.bottom > window.innerHeight) dodge();
+      var w = no.offsetWidth, h = no.offsetHeight;
+      fly.x = Math.min(fly.x, window.innerWidth - w - PAD);
+      fly.y = Math.min(fly.y, window.innerHeight - h - PAD);
+      if (!fly.on) { no.style.left = fly.x + 'px'; no.style.top = fly.y + 'px'; }
     });
+
+    // Let her read the question, then the No button lifts off on its own.
+    setTimeout(takeOff, 1400);
 
     // ---- Yes ----
     yes.addEventListener('click', function () {
       no.hidden = true;
+      fly.on = false;
       yes.disabled = true;
       function reveal() {
         ask.hidden = true;
