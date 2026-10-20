@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Saturday Night?</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;1,9..144,400;1,9..144,600&family=Nunito:wght@400;600;800&display=swap">
+<style>
+  /* Layout: one twilight screen, question centered, two buttons under it. The No button lives in a fixed layer so it can run anywhere. */
+  :root {
+    --bg: #1b1433;
+    --bg-2: #3a1f4f;
+    --fg: #fff6ec;
+    --muted: #cdb9d8;
+    --accent: #ffb347;
+    --accent-ink: #2b1500;
+    --no: #6e5a86;
+    --no-ink: #f3eaff;
+    --display: "Fraunces", "Iowan Old Style", Georgia, serif;
+    --body: "Nunito", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: var(--body);
+    color: var(--fg);
+    background: var(--bg);
+    background-image:
+      radial-gradient(1200px 600px at 20% -10%, var(--bg-2), transparent 60%),
+      radial-gradient(900px 500px at 110% 110%, #4a2a3f, transparent 60%);
+    overflow: hidden;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 0;
+    box-sizing: border-box;
+  }
+  #stars { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+  #confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+
+  main {
+    position: relative;
+    z-index: 1;
+    min-height: 100%;
+    display: grid;
+    place-items: center;
+    text-align: center;
+  }
+  .card { max-width: 34rem; display: grid; gap: 1.25rem; justify-items: center; }
+  .eyebrow {
+    font-size: .8rem; font-weight: 800; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--accent); margin: 0;
+  }
+  h1 {
+    font-family: var(--display);
+    font-style: italic;
+    font-weight: 400;
+    font-size: clamp(2.2rem, 7vw, 3.6rem);
+    line-height: 1.1;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h1 b { font-weight: 600; color: var(--accent); font-style: normal; }
+  .sub { color: var(--muted); font-size: 1.05rem; line-height: 1.5; margin: 0; max-width: 28rem; }
+
+  .choices {
+    display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; align-items: center;
+    margin-top: .5rem; min-height: 4rem;
+  }
+  button {
+    font: inherit; font-weight: 800; cursor: pointer; border: 0; border-radius: 999px;
+    padding: .9rem 2rem; font-size: 1.15rem; line-height: 1;
+    transition: transform .15s ease, font-size .2s ease, padding .2s ease;
+    touch-action: manipulation; user-select: none; -webkit-user-select: none;
+  }
+  button:focus-visible { outline: 3px solid var(--fg); outline-offset: 3px; }
+  #yes {
+    background: var(--accent); color: var(--accent-ink);
+    box-shadow: 0 10px 30px rgba(255, 179, 71, .35);
+  }
+  #yes:hover { transform: translateY(-2px) scale(1.03); }
+  #no {
+    background: var(--no); color: var(--no-ink);
+  }
+  #no.loose {
+    position: fixed; z-index: 4; margin: 0;
+  }
+  .hint { font-size: .85rem; color: var(--muted); min-height: 1.4em; margin: 0; }
+
+  #done { display: grid; gap: 1rem; justify-items: center; }
+  #done .big { font-size: 4rem; line-height: 1; }
+
+  @media (prefers-reduced-motion: reduce) {
+    button { transition: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="stars" aria-hidden="true"></canvas>
+<canvas id="confetti" aria-hidden="true"></canvas>
+
+<main>
+  <section class="card" id="ask">
+    <p class="eyebrow">A small question</p>
+    <h1 id="headline">Hey <b id="name">you</b>, are you free Saturday night?</h1>
+    <p class="sub">I'd love to take you out. Dinner, somewhere nice, good company guaranteed. Yes or no?</p>
+    <div class="choices" id="choices">
+      <button id="yes" type="button">Yes 🥰</button>
+      <button id="no" type="button">No</button>
+    </div>
+    <p class="hint" id="hint"></p>
+  </section>
+
+  <section class="card" id="done" hidden>
+    <div class="big">🎉</div>
+    <h1>It's a date. <b>Saturday night.</b></h1>
+    <p class="sub" id="doneSub">Knew you'd say yes. I'll text you the time and place. Wear something nice.</p>
+  </section>
+</main>
+
+<script>
+  (function () {
+    var yes = document.getElementById('yes');
+    var no = document.getElementById('no');
+    var hint = document.getElementById('hint');
+    var ask = document.getElementById('ask');
+    var done = document.getElementById('done');
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // Personalise with the link's #anchor, e.g. .../artifact/xyz#Sara
+    try {
+      var q = new URLSearchParams(location.search).get('name') || '';
+      var h = decodeURIComponent(q || (location.hash || '').slice(1)).replace(/[._~-]+/g, ' ').trim();
+      if (h && /^[A-Za-z][A-Za-z ]{0,30}$/.test(h)) {
+        document.getElementById('name').textContent = h.charAt(0).toUpperCase() + h.slice(1);
+      }
+    } catch (e) {}
+
+    // ---- The No button that won't be caught ----
+    var labels = ['No', 'Are you sure?', 'Really?', 'Think about it…', 'Nope, try again', 'Not an option', 'Yes is right there', 'Come on 😅', 'You can\'t catch me', 'Just say yes'];
+    var tries = 0;
+    var yesScale = 1;
+
+    function rand(min, max) { return Math.random() * (max - min) + min; }
+
+    function dodge(e) {
+      if (e) { e.preventDefault(); }
+      tries++;
+      var pad = 12;
+      var w = no.offsetWidth, hgt = no.offsetHeight;
+      var vw = window.innerWidth, vh = window.innerHeight;
+      if (!no.classList.contains('loose')) no.classList.add('loose');
+
+      // Pick a spot far from the pointer and away from the current position.
+      var cur = no.getBoundingClientRect();
+      var px = e && e.clientX != null ? e.clientX : cur.left + w / 2;
+      var py = e && e.clientY != null ? e.clientY : cur.top + hgt / 2;
+      var x, y, attempts = 0;
+      do {
+        x = rand(pad, Math.max(pad, vw - w - pad));
+        y = rand(pad, Math.max(pad, vh - hgt - pad));
+        attempts++;
+      } while (attempts < 20 && Math.hypot(x + w / 2 - px, y + hgt / 2 - py) < Math.min(vw, vh) * 0.35);
+      no.style.left = x + 'px';
+      no.style.top = y + 'px';
+
+      no.textContent = labels[Math.min(tries, labels.length - 1)];
+      if (tries > 3) {
+        var s = Math.max(0.55, 1 - (tries - 3) * 0.06);
+        no.style.fontSize = (1.15 * s) + 'rem';
+        no.style.padding = (0.9 * s) + 'rem ' + (2 * s) + 'rem';
+      }
+      yesScale = Math.min(1.6, 1 + tries * 0.05);
+      yes.style.transform = 'scale(' + yesScale + ')';
+
+      var hints = ['', 'Hm, it moved.', 'Slippery little button.', 'It really doesn\'t want to be pressed.', 'The other button is much easier to hit.', 'Okay, you\'ve made your point. Yes?'];
+      hint.textContent = tries < hints.length ? hints[tries] : hints[hints.length - 1];
+    }
+
+    no.addEventListener('pointerover', dodge);
+    no.addEventListener('pointerdown', dodge);
+    no.addEventListener('touchstart', dodge, { passive: false });
+    no.addEventListener('mousedown', dodge);
+    no.addEventListener('click', dodge);
+    no.addEventListener('focus', function () { dodge(); yes.focus(); });
+    no.addEventListener('keydown', function (e) { e.preventDefault(); dodge(); yes.focus(); });
+
+    // If she drags a finger onto it, hop away too.
+    document.addEventListener('pointermove', function (e) {
+      if (e.pointerType === 'mouse') return;
+      var r = no.getBoundingClientRect();
+      if (e.clientX > r.left - 24 && e.clientX < r.right + 24 && e.clientY > r.top - 24 && e.clientY < r.bottom + 24) dodge(e);
+    }, { passive: true });
+
+    window.addEventListener('resize', function () {
+      if (!no.classList.contains('loose')) return;
+      var r = no.getBoundingClientRect();
+      if (r.right > window.innerWidth || r.bottom > window.innerHeight) dodge();
+    });
+
+    // ---- Yes ----
+    yes.addEventListener('click', function () {
+      ask.hidden = true;
+      no.hidden = true;
+      done.hidden = false;
+      if (!reduce) confetti();
+    });
+
+    // ---- Stars ----
+    var sc = document.getElementById('stars'), sctx = sc.getContext('2d'), stars = [];
+    function sizeStars() {
+      sc.width = window.innerWidth * devicePixelRatio; sc.height = window.innerHeight * devicePixelRatio;
+      stars = [];
+      for (var i = 0; i < 90; i++) stars.push({ x: Math.random(), y: Math.random(), r: rand(.4, 1.6), p: Math.random() * 6.28 });
+    }
+    function drawStars(t) {
+      sctx.clearRect(0, 0, sc.width, sc.height);
+      for (var i = 0; i < stars.length; i++) {
+        var s = stars[i];
+        var a = reduce ? .7 : .45 + .45 * Math.sin(t / 900 + s.p);
+        sctx.globalAlpha = a;
+        sctx.fillStyle = '#fff6ec';
+        sctx.beginPath();
+        sctx.arc(s.x * sc.width, s.y * sc.height, s.r * devicePixelRatio, 0, 6.28);
+        sctx.fill();
+      }
+      if (!reduce) requestAnimationFrame(drawStars);
+    }
+    sizeStars(); drawStars(0);
+    window.addEventListener('resize', function () { sizeStars(); if (reduce) drawStars(0); });
+
+    // ---- Confetti ----
+    function confetti() {
+      var c = document.getElementById('confetti'), ctx = c.getContext('2d');
+      c.width = window.innerWidth * devicePixelRatio; c.height = window.innerHeight * devicePixelRatio;
+      var colors = ['#ffb347', '#ff6b9d', '#fff6ec', '#9d7bff', '#5fd4c1'];
+      var bits = [];
+      for (var i = 0; i < 180; i++) {
+        bits.push({
+          x: c.width / 2, y: c.height / 2,
+          vx: rand(-9, 9) * devicePixelRatio, vy: rand(-16, -4) * devicePixelRatio,
+          w: rand(5, 10) * devicePixelRatio, h: rand(8, 16) * devicePixelRatio,
+          rot: rand(0, 6.28), vr: rand(-.2, .2), col: colors[i % colors.length]
+        });
+      }
+      var start = performance.now();
+      function frame(now) {
+        var el = now - start;
+        ctx.clearRect(0, 0, c.width, c.height);
+        for (var i = 0; i < bits.length; i++) {
+          var b = bits[i];
+          b.vy += .35 * devicePixelRatio; b.x += b.vx; b.y += b.vy; b.rot += b.vr; b.vx *= .99;
+          ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.rot);
+          ctx.fillStyle = b.col; ctx.globalAlpha = Math.max(0, 1 - el / 3500);
+          ctx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h); ctx.restore();
+        }
+        if (el < 3600) requestAnimationFrame(frame); else ctx.clearRect(0, 0, c.width, c.height);
+      }
+      requestAnimationFrame(frame);
+    }
+  })();
+</script>
+</body>
+</html>
